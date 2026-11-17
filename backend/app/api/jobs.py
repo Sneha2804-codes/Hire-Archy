@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.analytics.matcher import _cosine, score_candidate_job
 from app.db import get_db
 from app.models import CandidateProfile, Job
+from app.schemas.jobs import JobPageResponse, LiveSearchRequest
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -21,9 +22,14 @@ def _payload(job: Job) -> dict:
         "company": job.company,
         "location": job.location,
         "country": job.country,
+        "region": job.region,
+        "engineering_branch": job.engineering_branch,
+        "domain": job.domain,
+        "is_live": job.is_live,
         "work_mode": job.work_mode,
         "salary_min_usd": job.salary_min_usd,
         "salary_max_usd": job.salary_max_usd,
+        "salary_display": job.salary_display,
         "salary_is_estimated": job.salary_is_estimated,
         "experience_level": job.experience_level,
         "description": job.description,
@@ -35,10 +41,15 @@ def _payload(job: Job) -> dict:
     }
 
 
-@router.get("")
+@router.get("", response_model=JobPageResponse, response_model_exclude_unset=True)
 async def list_jobs(
     q: str | None = None,
     category: str | None = None,
+    region: str | None = None,
+    country: str | None = None,
+    engineering_branch: str | None = None,
+    domain: str | None = None,
+    is_live: bool = True,
     work_mode: Literal["remote", "hybrid", "onsite"] | None = None,
     experience_level: list[Literal["entry", "mid", "senior", "lead"]] = Query(default=[]),
     min_salary: float | None = Query(default=None, ge=0),
@@ -56,6 +67,15 @@ async def list_jobs(
         statement = statement.where(or_(Job.title.ilike(pattern), Job.company.ilike(pattern), Job.description.ilike(pattern)))
     if category:
         statement = statement.where(Job.category == category)
+    statement = statement.where(Job.is_live.is_(is_live))
+    if region:
+        statement = statement.where(Job.region == region)
+    if country:
+        statement = statement.where(Job.country == country)
+    if engineering_branch:
+        statement = statement.where(Job.engineering_branch == engineering_branch)
+    if domain:
+        statement = statement.where(Job.domain == domain)
     if work_mode:
         statement = statement.where(Job.work_mode == work_mode)
     if experience_level:
@@ -114,3 +134,23 @@ async def list_jobs(
             item["match"] = match_by_id[job.id]
         items.append(item)
     return {"items": items, "total": total, "page": page, "limit": limit}
+
+
+@router.post("/live-search", response_model=JobPageResponse, response_model_exclude_unset=True)
+async def live_search_jobs(
+    filters: LiveSearchRequest,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Search real external sources, persist new matching roles, and return them."""
+    from app.etl.live_sources import collect_live_jobs
+    from app.etl.pipeline import ingest_live_records
+
+    keywords = " ".join(value.strip() for value in (filters.q, filters.engineering_branch, filters.domain) if value and value.strip())
+    raw_jobs = await collect_live_jobs(keywords=keywords or None, region=filters.region, limit=120)
+    result = await ingest_live_records(
+        raw_jobs,
+        source_label="LiveSearch",
+        filters=filters.model_dump(exclude_none=True),
+    )
+    items = [_payload(job) for job in result["items"]]
+    return {"items": items, "total": len(items), "page": 1, "limit": 120}

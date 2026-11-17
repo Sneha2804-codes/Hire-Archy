@@ -12,7 +12,7 @@ from app.analytics.matcher import score_candidate_job
 def _record(job: Any) -> dict[str, Any]:
     """Convert a SQLAlchemy Job or dictionary into analytics fields."""
     fields = (
-        "title", "company", "location", "country", "work_mode", "salary_min_usd",
+        "title", "company", "location", "country", "region", "engineering_branch", "work_mode", "salary_min_usd",
         "salary_max_usd", "experience_level", "description", "skills", "category",
         "apply_url", "source", "posted_at", "embedding", "id",
     )
@@ -46,7 +46,7 @@ def compute_market_stats(
     frame = pd.DataFrame(records)
     if frame.empty:
         frame = pd.DataFrame(columns=[
-            "title", "company", "work_mode", "salary_min_usd", "salary_max_usd",
+            "title", "company", "region", "engineering_branch", "work_mode", "salary_min_usd", "salary_max_usd",
             "experience_level", "skills", "category",
         ])
     for column in ("salary_min_usd", "salary_max_usd"):
@@ -103,8 +103,21 @@ def compute_market_stats(
             .sort_values(["category", "work_mode"])
         )
         volume_result = _json_records(volume)
+        engineering_regional = (
+            frame.assign(
+                engineering_branch=frame["engineering_branch"].fillna("Unclassified"),
+                region=frame["region"].fillna("Global/Remote"),
+            )
+            .groupby(["engineering_branch", "region"], dropna=False)
+            .size()
+            .rename("job_count")
+            .reset_index()
+            .sort_values(["engineering_branch", "region"])
+        )
+        engineering_regional_result = _json_records(engineering_regional)
     else:
         volume_result = []
+        engineering_regional_result = []
 
     roi_result: list[dict[str, Any]] = []
     if profile is not None:
@@ -137,5 +150,6 @@ def compute_market_stats(
         "top_skills": top_skills_result,
         "salary_distribution": salary_result,
         "job_volume": volume_result,
+        "engineering_regional_demand": engineering_regional_result,
         "personal_skill_gap_roi": roi_result,
     }

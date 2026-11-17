@@ -16,6 +16,10 @@ import { formatCompactCurrency, formatSalary } from "@/lib/utils";
 
 const COLORS = { remote: "#10b981", hybrid: "#0ea5e9", onsite: "#f59e0b" };
 const MODES = ["remote", "hybrid", "onsite"] as const;
+const REGIONAL_COLORS: Record<string, string> = {
+  India: "#f43f5e", APAC: "#06b6d4", Europe: "#8b5cf6", "North America": "#3b82f6",
+  "Middle East": "#f59e0b", "Global/Remote": "#10b981",
+};
 const TOOLTIP_STYLE = { backgroundColor: "var(--chart-tooltip-bg)", border: "1px solid var(--hairline)", borderRadius: 12, color: "var(--chart-tooltip-fg)", fontSize: 11, boxShadow: "0 14px 40px rgba(0,0,0,.18)", backdropFilter: "blur(20px)" };
 
 function StatCard({ label, value, detail, icon: Icon, accent = "emerald", trend, index }: {
@@ -74,6 +78,16 @@ export function AnalyticsDashboard() {
     value: (overview?.job_volume ?? []).filter((row) => row.work_mode === mode).reduce((sum, row) => sum + row.job_count, 0),
     color: COLORS[mode],
   })).filter((row) => row.value > 0), [overview?.job_volume]);
+  const regionNames = Object.keys(REGIONAL_COLORS);
+  const engineeringRegionalRows = useMemo(() => {
+    const grouped = new Map<string, Record<string, number | string>>();
+    for (const row of overview?.engineering_regional_demand ?? []) {
+      const current = grouped.get(row.engineering_branch) ?? { engineering_branch: row.engineering_branch };
+      current[row.region] = Number(current[row.region] ?? 0) + row.job_count;
+      grouped.set(row.engineering_branch, current);
+    }
+    return [...grouped.values()];
+  }, [overview?.engineering_regional_demand]);
 
   const busiestSkill = skills[0];
   const highestPayingSkill = [...skills].filter((skill) => skill.mean_salary_usd != null).sort((left, right) => (right.mean_salary_usd ?? 0) - (left.mean_salary_usd ?? 0))[0];
@@ -202,6 +216,31 @@ export function AnalyticsDashboard() {
                   {modeRows.map((row) => <div key={row.name} className="flex items-center justify-between gap-3 text-xs"><span className="flex items-center gap-2 text-zinc-500"><span className="size-2 rounded-full" style={{ backgroundColor: row.color }} />{row.name}</span><span className="font-medium tabular-nums text-zinc-200">{row.value}</span></div>)}
                   <div className="border-t border-white/[0.06] pt-3"><p className="text-[10px] uppercase tracking-[0.12em] text-zinc-700">Remote index</p><p className="mt-1 text-xl font-semibold text-white">{Math.round(remoteShare * 100)}<span className="text-sm text-zinc-600">%</span></p></div>
                 </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="mt-4">
+        <Card className="min-w-0">
+          <CardHeader className="flex flex-row items-start justify-between gap-3">
+            <div><CardTitle>Engineering branch & regional demand</CardTitle><CardDescription className="mt-1">Live role volume across engineering disciplines and hiring regions.</CardDescription></div>
+            <Badge tone="indigo">{engineeringRegionalRows.length} branches</Badge>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {loading ? <div className="h-[340px] animate-pulse rounded-xl bg-white/[0.025]" /> : engineeringRegionalRows.length === 0 ? <EmptyChart label="No engineering demand to compare" /> : (
+              <div className="h-[370px] min-w-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={engineeringRegionalRows} layout="vertical" margin={{ top: 8, right: 18, left: 8, bottom: 8 }}>
+                    <CartesianGrid horizontal={false} stroke="rgba(255,255,255,.055)" />
+                    <XAxis type="number" tickLine={false} axisLine={false} tick={{ fill: "#71717a", fontSize: 10 }} />
+                    <YAxis type="category" dataKey="engineering_branch" width={184} tickLine={false} axisLine={false} tick={{ fill: "#a1a1aa", fontSize: 10 }} />
+                    <Tooltip cursor={{ fill: "rgba(255,255,255,.03)" }} contentStyle={TOOLTIP_STYLE} formatter={(value, name) => [`${value ?? 0} roles`, name]} />
+                    <Legend wrapperStyle={{ fontSize: 10, color: "#71717a" }} />
+                    {regionNames.map((region) => <Bar key={region} dataKey={region} name={region} stackId="regional" fill={REGIONAL_COLORS[region]} radius={region === "Global/Remote" ? [0, 5, 5, 0] : undefined} barSize={18} />)}
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             )}
           </CardContent>

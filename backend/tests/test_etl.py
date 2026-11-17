@@ -15,7 +15,7 @@ from app.etl.scraper import parse_remoteok, parse_weworkremotely
         ("$100 k - $150 k annually", (100000.0, 150000.0)),
         ("$125,000 per year", (125000.0, 125000.0)),
         ("", (None, None)),
-        ("€80k-€100k", (None, None)),
+        ("€80k-€100k", (86400.0, 108000.0)),
     ],
 )
 def test_parse_salary_annualizes_and_normalizes(raw, expected):
@@ -35,19 +35,19 @@ def test_clean_jobs_normalizes_fields_extracts_skills_and_deduplicates():
             "location": "  REMOTE   - USA ",
             "description": "Build analytics pipelines with React.js, ReactJS, Postgres, and Python.",
             "salary": "$80k-$120k",
-            "apply_url": "https://example.com/job/1",
+            "apply_url": "https://jobs.acme.test/job/1",
             "source": "Example",
         },
         {
             "title": "Senior Data Engineer",
             "company": "ACME LLC",
-            "location": "Remote",
+            "location": "Remote - USA",
             "description": "Build data pipelines using Python and PostgreSQL.",
             "salary": "$90,000-$130,000",
-            "apply_url": "https://example.com/job/2",
+            "apply_url": "https://jobs.acme.test/job/2",
             "source": "Example Two",
         },
-        {"title": "", "company": "Missing title", "apply_url": "https://example.com/invalid"},
+        {"title": "", "company": "Missing title", "apply_url": "https://jobs.acme.test/invalid"},
     ]
 
     frame, stats = clean_jobs(rows)
@@ -70,7 +70,7 @@ def test_missing_salary_is_imputed_and_flagged():
         "company": "Example Co",
         "location": "Austin, TX",
         "description": "Build Python and FastAPI services.",
-        "apply_url": "https://example.com/jobs/backend",
+        "apply_url": "https://jobs.backend.test/jobs/backend",
     }])
 
     job = frame.iloc[0]

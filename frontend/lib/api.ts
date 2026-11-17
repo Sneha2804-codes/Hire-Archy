@@ -27,9 +27,14 @@ export type Job = {
   company: string;
   location: string;
   country: string;
+  region?: string | null;
+  engineering_branch?: string | null;
+  domain?: string | null;
+  is_live?: boolean;
   work_mode: "remote" | "hybrid" | "onsite";
   salary_min_usd: number;
   salary_max_usd: number;
+  salary_display?: string | null;
   salary_is_estimated: boolean;
   experience_level: "entry" | "mid" | "senior" | "lead";
   description: string;
@@ -64,7 +69,20 @@ export type MarketOverview = {
     maximum: number;
   }[];
   job_volume: { category: string; work_mode: string; job_count: number }[];
+  engineering_regional_demand: { engineering_branch: string; region: string; job_count: number }[];
   personal_skill_gap_roi: { skill: string; high_scoring_jobs: number; mean_match_score: number }[];
+};
+
+export type Taxonomy = {
+  branches: Record<string, string[]>;
+  regions: string[];
+};
+
+export type LiveSearchFilters = {
+  q?: string;
+  region?: string;
+  engineering_branch?: string;
+  domain?: string;
 };
 
 export type EtlRun = {

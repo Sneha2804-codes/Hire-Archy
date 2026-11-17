@@ -16,19 +16,23 @@ export function JobDetailSheet({ job, open, onOpenChange }: { job: Job | null; o
   if (!job) return null;
   const match = job.match;
   const matchTone = (match?.total_score ?? 0) >= 80 ? "emerald" : (match?.total_score ?? 0) >= 60 ? "indigo" : "amber";
+  let applyDomain = "Verified external listing";
+  try { applyDomain = new URL(job.apply_url).hostname.replace(/^www\./, ""); } catch { /* Invalid URLs remain unlinked by the source pipeline. */ }
+  const sourceLabel = job.source === "Greenhouse" ? "Greenhouse ATS" : job.source === "Lever" ? "Lever ATS" : job.source;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="p-0">
         <div className="border-b border-white/[0.07] bg-gradient-to-br from-emerald-300/[0.07] via-transparent to-indigo-400/[0.055] p-6 pb-7 sm:p-8">
-          <div className="mb-7 flex items-center justify-between pr-10">
-            <Badge tone="default" className="uppercase tracking-[0.12em]">{job.category}</Badge>
+          <div className="mb-7 flex flex-wrap items-center justify-between gap-2 pr-10">
+            <div className="flex flex-wrap gap-1.5"><Badge tone="default" className="uppercase tracking-[0.12em]">{job.category}</Badge><Badge className="border-white/[0.08] bg-zinc-950/40 text-zinc-400">{sourceLabel}</Badge></div>
             {match ? <Badge tone={matchTone} className="gap-1.5"><Sparkles className="size-3" />{Math.round(match.total_score)}% match</Badge> : <Badge>CV match ready</Badge>}
           </div>
           <SheetTitle className="max-w-lg">{job.title}</SheetTitle>
           <p className="mt-2 text-sm text-zinc-300">{job.company}</p>
           <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-zinc-500">
             <span className="inline-flex items-center gap-1.5"><MapPin className="size-3.5" />{job.location}{job.country && job.country !== "Unknown" ? `, ${job.country}` : ""}</span>
+            <Badge className="border-cyan-300/15 bg-cyan-300/[0.05] text-cyan-200">{job.region || "Global/Remote"} · {job.country && job.country !== "Unknown" ? job.location.split(",")[0] : "Remote"}</Badge>
             <span className="capitalize">{job.work_mode}</span>
             <span>{timeAgo(job.posted_at)}</span>
           </div>
@@ -80,12 +84,13 @@ export function JobDetailSheet({ job, open, onOpenChange }: { job: Job | null; o
 
           <section>
             <h3 className="mb-3 text-sm font-semibold text-white">Role signals</h3>
+            <div className="mb-3 flex flex-wrap gap-1.5"><Badge tone="indigo">{job.engineering_branch || "Engineering"}</Badge>{job.domain && <Badge className="border-cyan-300/15 bg-cyan-300/[0.05] text-cyan-200">{job.domain}</Badge>}</div>
             <div className="flex flex-wrap gap-2">{job.skills.map((skill) => <Badge key={skill}>{skill}</Badge>)}</div>
             <p className="mt-3 text-xs capitalize text-zinc-600">{job.experience_level} level · {job.work_mode} · {job.category}</p>
           </section>
 
           <Button asChild className="h-12 w-full justify-between px-5">
-            <a href={job.apply_url} target="_blank" rel="noreferrer">Apply directly <ExternalLink className="size-4" /></a>
+            <a href={job.apply_url} target="_blank" rel="noopener noreferrer"><span>Apply Directly <span className="ml-2 text-xs font-normal text-white/65">{applyDomain}</span></span><ExternalLink className="size-4" /></a>
           </Button>
           {profile && <p className="text-center text-[10px] text-zinc-700">Scores are guidance based on the uploaded CV and listing content.</p>}
         </div>

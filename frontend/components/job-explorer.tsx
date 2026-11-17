@@ -1,19 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
-import { ArrowDownWideNarrow, ArrowLeft, ArrowRight, BriefcaseBusiness, Check, CircleHelp, FileText, Filter, MapPin, Search, Sparkles, SlidersHorizontal, UploadCloud, Wifi } from "lucide-react";
+import { ArrowDownWideNarrow, ArrowLeft, ArrowRight, BriefcaseBusiness, Check, CircleHelp, FileText, Filter, LoaderCircle, MapPin, Search, Sparkles, SlidersHorizontal, UploadCloud, Wifi } from "lucide-react";
 import { motion } from "framer-motion";
 import { useApp } from "@/components/app-provider";
 import { JobDetailSheet } from "@/components/job-detail-sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { apiFetch, type Job, type JobPage, type MarketOverview } from "@/lib/api";
+import { apiFetch, type Job, type JobPage, type LiveSearchFilters, type MarketOverview, type Taxonomy } from "@/lib/api";
 import { formatCompactCurrency, formatSalary, timeAgo } from "@/lib/utils";
 
 const CATEGORIES = ["Software Engineering", "Data Science", "AI/ML", "DevOps", "Product"];
 const LEVELS = ["entry", "mid", "senior", "lead"] as const;
 const QUICK_SKILLS = ["Python", "TypeScript", "React", "SQL", "AWS", "PostgreSQL", "Docker", "Machine Learning"];
+const REGIONS = ["India", "APAC", "Europe", "North America", "Middle East", "Global/Remote"];
+const FALLBACK_BRANCHES = ["Computer Science & IT", "Mechanical Engineering", "Civil & Structural Engineering", "Electrical & Electronics", "Chemical & Process", "Aerospace & Automotive", "Industrial & Manufacturing"];
 const PAGE_SIZE = 12;
 const CATEGORY_TONES: Record<string, string> = {
   "AI/ML": "border-violet-400/25 bg-violet-400/10 text-violet-200",
@@ -27,6 +29,15 @@ const MODE_TONES: Record<string, string> = {
   hybrid: "border-sky-400/25 bg-sky-400/10 text-sky-200",
   onsite: "border-amber-400/25 bg-amber-400/10 text-amber-200",
 };
+const REGION_TONES: Record<string, string> = {
+  India: "border-rose-300/20 bg-rose-300/[0.07] text-rose-200",
+  APAC: "border-cyan-300/20 bg-cyan-300/[0.07] text-cyan-200",
+  Europe: "border-violet-300/20 bg-violet-300/[0.07] text-violet-200",
+  "North America": "border-blue-300/20 bg-blue-300/[0.07] text-blue-200",
+  "Middle East": "border-amber-300/20 bg-amber-300/[0.07] text-amber-200",
+  "Global/Remote": "border-emerald-300/20 bg-emerald-300/[0.07] text-emerald-200",
+};
+const SOURCE_LABELS: Record<string, string> = { Greenhouse: "Greenhouse ATS", Lever: "Lever ATS" };
 const AVATAR_GRADIENTS = [
   "linear-gradient(135deg,#6366f1,#a855f7)",
   "linear-gradient(135deg,#0ea5e9,#14b8a6)",
@@ -66,6 +77,9 @@ function JobCard({ job, onClick, profileActive }: { job: Job; onClick: () => voi
           <div className="min-w-0 flex-1">
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <Badge className={`uppercase tracking-[0.08em] ${CATEGORY_TONES[job.category] ?? ""}`}>{job.category}</Badge>
+              <Badge className={REGION_TONES[job.region ?? ""] ?? "border-white/10 bg-white/[0.04] text-zinc-300"}>{job.region || "Global/Remote"} · {job.country && job.country !== "Unknown" ? job.location.split(",")[0] : "Remote"}</Badge>
+              <Badge tone="indigo" className="max-w-full truncate">{job.engineering_branch || "Engineering"}{job.domain ? ` · ${job.domain}` : ""}</Badge>
+              <Badge className="border-white/[0.08] bg-zinc-950/40 text-zinc-500">{SOURCE_LABELS[job.source] ?? job.source}</Badge>
               <span className="text-[10px] text-zinc-600">{timeAgo(job.posted_at)}</span>
             </div>
             <h2 className="text-base font-semibold tracking-[-0.025em] text-zinc-100 transition group-hover:text-white sm:text-lg">{job.title}</h2>
@@ -102,14 +116,22 @@ function JobCard({ job, onClick, profileActive }: { job: Job; onClick: () => voi
 
 function FilterSidebar({
   category, setCategory, workMode, setWorkMode, levels, setLevels, minSalary, setMinSalary,
-  skills, setSkills,
+  skills, setSkills, region, setRegion, branch, setBranch, domain, setDomain, taxonomy, setPage,
 }: {
   category: string; setCategory: (value: string) => void;
   workMode: string; setWorkMode: (value: string) => void;
   levels: string[]; setLevels: (value: string[]) => void;
   minSalary: number; setMinSalary: (value: number) => void;
   skills: string[]; setSkills: (value: string[]) => void;
+  region: string; setRegion: (value: string) => void;
+  branch: string; setBranch: (value: string) => void;
+  domain: string; setDomain: (value: string) => void;
+  taxonomy: Taxonomy | null;
+  setPage: (value: number) => void;
 }) {
+  const branches = taxonomy?.branches ?? {};
+  const branchOptions = Object.keys(branches);
+  const regionOptions = taxonomy?.regions.length ? taxonomy.regions : REGIONS;
   function toggle(list: string[], value: string, setter: (value: string[]) => void) {
     setter(list.includes(value) ? list.filter((item) => item !== value) : [...list, value]);
   }
@@ -127,6 +149,26 @@ function FilterSidebar({
             return <button key={item} type="button" aria-pressed={active} onClick={() => setCategory(value)} className={`rounded-lg border px-2.5 py-2 text-[10px] transition ${active ? tone : "border-white/[0.07] bg-white/[0.02] text-zinc-500 hover:text-zinc-200"}`}>{item}</button>;
           })}
         </div>
+      </div>
+      <div className="space-y-4">
+        <label className="block">
+          <span className="mb-2 block text-[10px] font-medium uppercase tracking-[0.14em] text-zinc-600">Region</span>
+          <select value={region} onChange={(event) => { setRegion(event.target.value); setPage(1); }} className="h-10 w-full rounded-xl border border-white/[0.07] bg-zinc-950/75 px-3 text-xs text-zinc-300 outline-none transition focus:border-indigo-300/30 focus:ring-1 focus:ring-indigo-300/15">
+            <option value="">All Regions</option>{regionOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-2 block text-[10px] font-medium uppercase tracking-[0.14em] text-zinc-600">Engineering branch</span>
+          <select value={branch} onChange={(event) => { setBranch(event.target.value); setDomain(""); setPage(1); }} className="h-10 w-full rounded-xl border border-white/[0.07] bg-zinc-950/75 px-3 text-xs text-zinc-300 outline-none transition focus:border-indigo-300/30 focus:ring-1 focus:ring-indigo-300/15">
+            <option value="">All Branches</option>{(branchOptions.length ? branchOptions : FALLBACK_BRANCHES).map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </label>
+        {branch && <label className="block">
+          <span className="mb-2 block text-[10px] font-medium uppercase tracking-[0.14em] text-zinc-600">Domain</span>
+          <select value={domain} onChange={(event) => { setDomain(event.target.value); setPage(1); }} className="h-10 w-full rounded-xl border border-white/[0.07] bg-zinc-950/75 px-3 text-xs text-zinc-300 outline-none transition focus:border-cyan-300/30 focus:ring-1 focus:ring-cyan-300/15">
+            <option value="">All domains</option>{(branches[branch] ?? []).map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </label>}
       </div>
       <div>
         <label className="mb-2 block text-[10px] font-medium uppercase tracking-[0.14em] text-zinc-600">Work mode</label>
@@ -166,6 +208,10 @@ export function JobExplorer() {
   const { profile, setUploadOpen, uploadCv, notify, lastRun } = useApp();
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
+  const [region, setRegion] = useState("");
+  const [branch, setBranch] = useState("");
+  const [domain, setDomain] = useState("");
+  const [taxonomy, setTaxonomy] = useState<Taxonomy | null>(null);
   const [workMode, setWorkMode] = useState("");
   const [levels, setLevels] = useState<string[]>([]);
   const [minSalary, setMinSalary] = useState(0);
@@ -182,7 +228,12 @@ export function JobExplorer() {
   const [overview, setOverview] = useState<MarketOverview | null>(null);
   const [draggingCv, setDraggingCv] = useState(false);
   const [uploadingCv, setUploadingCv] = useState(false);
+  const [fetchingLive, setFetchingLive] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    apiFetch<Taxonomy>("/taxonomy").then(setTaxonomy).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     apiFetch<MarketOverview>("/analytics/overview").then(setOverview).catch(() => undefined);
@@ -218,7 +269,7 @@ export function JobExplorer() {
     finally { setUploadingCv(false); }
   }
 
-  const activeFilters = useMemo(() => Boolean(search || category || workMode || levels.length || minSalary || skills.length), [search, category, workMode, levels.length, minSalary, skills.length]);
+  const activeFilters = useMemo(() => Boolean(search || category || region || branch || domain || workMode || levels.length || minSalary || skills.length), [search, category, region, branch, domain, workMode, levels.length, minSalary, skills.length]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -227,6 +278,9 @@ export function JobExplorer() {
       const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE), sort_by: profile ? sortBy : sortBy === "match" ? "recent" : sortBy });
       if (search.trim()) params.set("q", search.trim());
       if (category) params.set("category", category);
+      if (region) params.set("region", region);
+      if (branch) params.set("engineering_branch", branch);
+      if (domain) params.set("domain", domain);
       if (workMode) params.set("work_mode", workMode);
       if (minSalary) params.set("min_salary", String(minSalary));
       if (profile) params.set("profile_id", String(profile.id));
@@ -241,7 +295,32 @@ export function JobExplorer() {
         .finally(() => setLoading(false));
     }, search ? 250 : 0);
     return () => window.clearTimeout(timeout);
-  }, [search, category, workMode, levels, minSalary, skills, profile?.id, sortBy, page, reloadKey, lastRun?.id]);
+  }, [search, category, region, branch, domain, workMode, levels, minSalary, skills, profile?.id, sortBy, page, reloadKey, lastRun?.id]);
+
+  async function fetchLiveJobs() {
+    if (fetchingLive) return;
+    setFetchingLive(true);
+    try {
+      const filters: LiveSearchFilters = {
+        ...(search.trim() ? { q: search.trim() } : {}),
+        ...(region ? { region } : {}),
+        ...(branch ? { engineering_branch: branch } : {}),
+        ...(domain ? { domain } : {}),
+      };
+      const response = await apiFetch<JobPage>("/jobs/live-search", { method: "POST", body: JSON.stringify(filters) });
+      notify({
+        title: response.total ? "Live roles added" : "Live search complete",
+        message: response.total ? `${response.total} new verified role${response.total === 1 ? "" : "s"} added to the index.` : "No new matching roles were found across live sources.",
+        tone: response.total ? "success" : "info",
+      });
+      setPage(1);
+      setReloadKey((value) => value + 1);
+    } catch (cause) {
+      notify({ title: "Live search unavailable", message: cause instanceof Error ? cause.message : "Try again in a moment.", tone: "error" });
+    } finally {
+      setFetchingLive(false);
+    }
+  }
 
   function openJob(job: Job) {
     setSelected(job);
@@ -297,24 +376,31 @@ export function JobExplorer() {
       </div>
 
       <div className="grid items-start gap-5 lg:grid-cols-[250px_minmax(0,1fr)] xl:grid-cols-[270px_minmax(0,1fr)]">
-        <div className="hidden lg:block"><FilterSidebar {...{ category, setCategory, workMode, setWorkMode, levels, setLevels, minSalary, setMinSalary, skills, setSkills }} /></div>
+        <div className="hidden lg:block"><FilterSidebar {...{ category, setCategory, workMode, setWorkMode, levels, setLevels, minSalary, setMinSalary, skills, setSkills, region, setRegion, branch, setBranch, domain, setDomain, taxonomy, setPage }} /></div>
         <div className="min-w-0">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div><h2 className="text-sm font-semibold text-zinc-100">Open opportunities</h2><p className="mt-1 text-xs text-zinc-600">{loading ? "Finding relevant roles…" : `${data?.total ?? 0} roles match your search`}{activeFilters && " · filters applied"}</p></div>
             <div className="flex items-center gap-2">
               <Button variant="secondary" size="sm" onClick={() => setMobileFiltersOpen((value) => !value)} className="lg:hidden"><Filter className="size-3.5" /> Filters</Button>
+              <Button size="sm" onClick={() => void fetchLiveJobs()} disabled={fetchingLive} className="min-w-[126px]">
+                {fetchingLive ? <LoaderCircle className="size-3.5 animate-spin" /> : <Wifi className="size-3.5" />}
+                {fetchingLive ? "Searching…" : "Fetch Live Jobs"}
+              </Button>
               {profile && <Badge tone="indigo" className="hidden gap-1.5 sm:inline-flex"><Sparkles className="size-3" />Ranked for {profile.name.split(" ")[0]}</Badge>}
               <label className="flex h-9 items-center gap-2 rounded-lg border border-white/[0.07] bg-zinc-900/50 px-3 text-xs text-zinc-500"><ArrowDownWideNarrow className="size-3.5" /><select value={!profile && sortBy === "match" ? "recent" : sortBy} onChange={(event) => setSortBy(event.target.value as typeof sortBy)} className="bg-transparent text-xs text-zinc-300 outline-none"><option value="match" disabled={!profile}>Best fit</option><option value="recent">Most recent</option><option value="salary">Highest salary</option></select></label>
             </div>
           </div>
 
-          {mobileFiltersOpen && <div className="mb-4 lg:hidden"><FilterSidebar {...{ category, setCategory, workMode, setWorkMode, levels, setLevels, minSalary, setMinSalary, skills, setSkills }} /></div>}
+          {mobileFiltersOpen && <div className="mb-4 lg:hidden"><FilterSidebar {...{ category, setCategory, workMode, setWorkMode, levels, setLevels, minSalary, setMinSalary, skills, setSkills, region, setRegion, branch, setBranch, domain, setDomain, taxonomy, setPage }} /></div>}
 
           {activeFilters && <div className="mb-4 flex flex-wrap gap-1.5">
             {category && <button onClick={() => { setCategory(""); setPage(1); }} className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] text-zinc-400">{category} ×</button>}
+            {region && <button onClick={() => { setRegion(""); setPage(1); }} className={`rounded-full border px-2.5 py-1 text-[10px] ${REGION_TONES[region] ?? "border-white/10 bg-white/[0.04] text-zinc-400"}`}>{region} ×</button>}
+            {branch && <button onClick={() => { setBranch(""); setDomain(""); setPage(1); }} className="rounded-full border border-indigo-300/15 bg-indigo-300/[0.04] px-2.5 py-1 text-[10px] text-indigo-200">{branch} ×</button>}
+            {domain && <button onClick={() => { setDomain(""); setPage(1); }} className="rounded-full border border-cyan-300/15 bg-cyan-300/[0.04] px-2.5 py-1 text-[10px] text-cyan-200">{domain} ×</button>}
             {workMode && <button onClick={() => { setWorkMode(""); setPage(1); }} className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] capitalize text-zinc-400">{workMode} ×</button>}
             {skills.map((skill) => <button key={skill} onClick={() => { setSkills(skills.filter((item) => item !== skill)); setPage(1); }} className="rounded-full border border-indigo-300/15 bg-indigo-300/[0.04] px-2.5 py-1 text-[10px] text-indigo-200">{skill} ×</button>)}
-            <button onClick={() => { setSearch(""); setCategory(""); setWorkMode(""); setLevels([]); setMinSalary(0); setSkills([]); setPage(1); }} className="px-2 py-1 text-[10px] text-zinc-600 hover:text-zinc-300">Clear all</button>
+            <button onClick={() => { setSearch(""); setCategory(""); setRegion(""); setBranch(""); setDomain(""); setWorkMode(""); setLevels([]); setMinSalary(0); setSkills([]); setPage(1); }} className="px-2 py-1 text-[10px] text-zinc-600 hover:text-zinc-300">Clear all</button>
           </div>}
 
           {error ? (
@@ -333,7 +419,11 @@ export function JobExplorer() {
               <div className="mb-4 flex size-12 items-center justify-center rounded-2xl border border-white/[0.07] bg-white/[0.025] text-zinc-500"><SlidersHorizontal className="size-5" /></div>
               <h3 className="text-sm font-semibold text-zinc-200">No roles match these filters</h3>
               <p className="mt-2 text-xs text-zinc-600">Clear one or more filters to widen your search.</p>
-              <Button variant="ghost" size="sm" onClick={() => { setSearch(""); setCategory(""); setWorkMode(""); setLevels([]); setMinSalary(0); setSkills([]); }}>Reset filters</Button>
+              <Button size="sm" onClick={() => void fetchLiveJobs()} disabled={fetchingLive} className="mt-4">
+                {fetchingLive ? <LoaderCircle className="size-3.5 animate-spin" /> : <Wifi className="size-3.5" />}
+                {fetchingLive ? "Searching live sources…" : "Fetch Live Jobs"}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => { setSearch(""); setCategory(""); setRegion(""); setBranch(""); setDomain(""); setWorkMode(""); setLevels([]); setMinSalary(0); setSkills([]); setPage(1); }}>Reset filters</Button>
             </Card>
           )}
 

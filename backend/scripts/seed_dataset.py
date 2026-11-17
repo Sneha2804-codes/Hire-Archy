@@ -1,11 +1,12 @@
-"""Seed 150 realistic demo listings for local analytics development.
+"""Offline demo fixture helpers and a legacy synthetic-listing purge command.
 
 Embeddings are deterministic, normalized feature-hash vectors. They are useful
 for local similarity demos and preserve lexical similarity without an API key;
 replace them with production model embeddings before using match scores for
 real hiring decisions.
 
-Run from ``backend/``; missing SQLite tables are created automatically:
+``build_rows`` is retained for deterministic unit fixtures only. Running this
+script removes old demo rows and never inserts synthetic listings:
     python scripts/seed_dataset.py
 """
 
@@ -245,20 +246,22 @@ def build_rows() -> list[dict]:
 
 
 async def seed() -> None:
-    """Replace only this generator's prior rows, then insert 150 fresh rows."""
-    from sqlalchemy import delete
+    """Purge legacy demo/dummy rows without inserting non-genuine listings."""
+    from sqlalchemy import delete, func, or_
 
-    from app.db import AsyncSessionLocal, engine
-    from app.models import Base, Job
+    from app.db import AsyncSessionLocal
+    from app.models import Job
 
-    rows = build_rows()
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+    fake_sources = (SOURCE, "demo", "dummy", "synthetic", "test")
     async with AsyncSessionLocal() as session:
         async with session.begin():
-            await session.execute(delete(Job).where(Job.source == SOURCE))
-            session.add_all(Job(**row) for row in rows)
-    print(f"Seeded {len(rows)} jobs across {len(CATEGORIES)} categories from {SOURCE}.")
+            result = await session.execute(delete(Job).where(or_(
+                Job.source.ilike("%hire-archy-seed%"),
+                func.lower(Job.source).in_(fake_sources),
+                Job.apply_url.ilike("%example.com%"),
+            )))
+            deleted = result.rowcount or 0
+    print(f"Purged {deleted} synthetic/demo listings. No jobs were generated.")
 
 
 if __name__ == "__main__":

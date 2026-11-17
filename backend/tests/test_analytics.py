@@ -69,6 +69,7 @@ def test_pandas_market_aggregations_cover_skills_salary_and_volume():
             "experience_level": "senior", "skills": ["Python", "SQL", "AWS"],
             "category": "Data Science", "embedding": [1.0, 0.0],
             "description": "Python SQL AWS data platform", "location": "Remote", "country": "US",
+            "region": "North America", "engineering_branch": "Computer Science & IT",
         },
         {
             "title": "Data Scientist", "company": "Beta", "work_mode": "remote",
@@ -76,6 +77,7 @@ def test_pandas_market_aggregations_cover_skills_salary_and_volume():
             "experience_level": "mid", "skills": ["Python", "SQL", "Scikit-learn"],
             "category": "Data Science", "embedding": [1.0, 0.0],
             "description": "Python SQL machine learning", "location": "Remote", "country": "US",
+            "region": "North America", "engineering_branch": "Computer Science & IT",
         },
         {
             "title": "Product Manager", "company": "Gamma", "work_mode": "hybrid",
@@ -83,6 +85,7 @@ def test_pandas_market_aggregations_cover_skills_salary_and_volume():
             "experience_level": "senior", "skills": ["Product Strategy", "SQL"],
             "category": "Product", "embedding": [1.0, 0.0],
             "description": "Product analytics strategy SQL", "location": "New York", "country": "US",
+            "region": "North America", "engineering_branch": "Computer Science & IT",
         },
     ]
 
@@ -103,6 +106,12 @@ def test_pandas_market_aggregations_cover_skills_salary_and_volume():
     volumes = {(row["category"], row["work_mode"]): row["job_count"] for row in result["job_volume"]}
     assert volumes[("Data Science", "remote")] == 2
     assert volumes[("Product", "hybrid")] == 1
+    branch_demand = result["engineering_regional_demand"]
+    assert branch_demand == [{
+        "engineering_branch": "Computer Science & IT",
+        "region": "North America",
+        "job_count": 3,
+    }]
 
 
 def test_personal_skill_gap_roi_ranks_missing_skills_in_strong_matches():

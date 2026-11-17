@@ -23,6 +23,9 @@ class Job(Base):
         UniqueConstraint("apply_url", name="uq_jobs_apply_url"),
         Index("ix_jobs_category_experience", "category", "experience_level"),
         Index("ix_jobs_location_country", "location", "country"),
+        Index("ix_jobs_region", "region"),
+        Index("ix_jobs_engineering_taxonomy", "engineering_branch", "domain"),
+        Index("ix_jobs_is_live", "is_live"),
         Index("ix_jobs_posted_at", "posted_at"),
     )
 
@@ -31,9 +34,14 @@ class Job(Base):
     company: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
     location: Mapped[str] = mapped_column(String(160), nullable=False)
     country: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    region: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    engineering_branch: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    domain: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    is_live: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     work_mode: Mapped[str] = mapped_column(String(20), nullable=False)
     salary_min_usd: Mapped[float] = mapped_column(Float, nullable=False)
     salary_max_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    salary_display: Mapped[str | None] = mapped_column(String(160), nullable=True)
     salary_is_estimated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     experience_level: Mapped[str] = mapped_column(String(20), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)

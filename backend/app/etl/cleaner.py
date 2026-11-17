@@ -5,8 +5,11 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 from typing import Any
+from urllib.parse import urlparse
 
 import pandas as pd
+
+from app.etl.taxonomy import classify_job, extract_canonical_skills
 
 
 # Approximate annual USD salary bands used only when a source supplies no pay.
@@ -16,6 +19,13 @@ SALARY_BENCHMARKS: dict[str, tuple[int, int]] = {
     "mid": (95_000, 145_000),
     "senior": (140_000, 205_000),
     "lead": (175_000, 250_000),
+}
+
+# Fallback conversion factors are USD per unit of local currency. The raw clean
+# salary string is stored alongside USD values so clients can show source pay.
+FX_USD_PER_UNIT: dict[str, float] = {
+    "USD": 1.0, "INR": 0.0120, "SGD": 0.74, "AUD": 0.66, "EUR": 1.08,
+    "GBP": 1.27, "CAD": 0.73, "NZD": 0.61,
 }
 
 CATEGORY_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -106,6 +116,16 @@ def _text(value: Any) -> str:
     return str(value).strip()
 
 
+def _authentic_https_apply_url(value: str) -> bool:
+    """Reject placeholders and non-HTTPS links; never synthesize apply URLs."""
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").casefold().rstrip(".")
+    return parsed.scheme == "https" and bool(host) and not (
+        host in {"example.com", "example.org", "example.net", "example.invalid"}
+        or host.endswith(".example.com")
+    )
+
+
 def _number(token: str) -> float:
     """Parse a salary amount token, including comma grouping and k suffixes."""
     cleaned = token.strip().replace(",", "").replace(" ", "")
@@ -128,8 +148,13 @@ def parse_salary(value: Any, annual_hours: int = 2_080) -> tuple[float | None, f
     if not salary:
         return None, None
 
-    currency = re.search(r"\b(EUR|GBP|INR|CAD|AUD|SGD|JPY|EUR|GBP)\b|[€£₹¥]", salary, re.I)
-    if currency:
+    currency_match = re.search(r"\b(USD|INR|SGD|AUD|EUR|GBP|CAD|NZD)\b|[€£₹]|\bS\$|\bA\$|C\$", salary, re.I)
+    currency_token = currency_match.group(0).upper() if currency_match else "USD"
+    currency_code = {
+        "₹": "INR", "£": "GBP", "€": "EUR", "S$": "SGD", "A$": "AUD", "C$": "CAD",
+    }.get(currency_token, currency_token)
+    fx = FX_USD_PER_UNIT.get(currency_code)
+    if fx is None:
         return None, None
 
     amounts = re.findall(r"(?<![\w.])\d[\d,]*(?:\.\d+)?(?:\s*[kKmM](?![a-zA-Z]))?", salary)
@@ -154,7 +179,7 @@ def parse_salary(value: Any, annual_hours: int = 2_080) -> tuple[float | None, f
     else:
         factor = 1
 
-    low, high = min(parsed) * factor, max(parsed) * factor
+    low, high = min(parsed) * factor * fx, max(parsed) * factor * fx
     return round(low, 2), round(high, 2)
 
 
@@ -252,16 +277,24 @@ def extract_skills(record: dict[str, Any]) -> list[str]:
         _text(record.get(field))
         for field in ("title", "description", "skills", "tags", "technologies")
     ).lower()
-    found = []
-    for canonical, patterns in SKILL_PATTERNS:
-        if any(re.search(pattern, text, re.I) for pattern in patterns):
-            found.append(canonical)
-    return found
+    return extract_canonical_skills(text)
 
 
 def _salary_fields(record: dict[str, Any]) -> tuple[float | None, float | None, bool]:
     """Read explicit numeric salary fields first, then parse source text."""
     low, high = record.get("salary_min_usd"), record.get("salary_max_usd")
+    if low in (None, "") and high in (None, ""):
+        native_low = record.get("salary_min_native", record.get("salary_min"))
+        native_high = record.get("salary_max_native", record.get("salary_max"))
+        try:
+            fx = FX_USD_PER_UNIT.get(str(record.get("salary_currency") or "USD").upper())
+            if fx is not None and (native_low not in (None, "") or native_high not in (None, "")):
+                low = float(native_low) * fx if native_low not in (None, "") else None
+                high = float(native_high) * fx if native_high not in (None, "") else None
+                partial_range = low is None or high is None
+                return (low if low is not None else high, high if high is not None else low, partial_range)
+        except (TypeError, ValueError):
+            pass
     try:
         low = float(low) if low not in (None, "") and not pd.isna(low) else None
     except (TypeError, ValueError):
@@ -277,11 +310,11 @@ def _salary_fields(record: dict[str, Any]) -> tuple[float | None, float | None, 
     return parsed[0], parsed[1], parsed[0] is None or parsed[1] is None
 
 
-def _is_duplicate(left: tuple[str, str], right: tuple[str, str], threshold: float) -> bool:
-    """Require both title and company to match exactly or fuzzily."""
+def _is_duplicate(left: tuple[str, str, str], right: tuple[str, str, str], threshold: float) -> bool:
+    """Require matching country and title/company exact or fuzzy agreement."""
     if left == right:
         return True
-    if not all(left) or not all(right):
+    if left[2] != right[2] or not all(left[:2]) or not all(right[:2]):
         return False
     title_similarity = SequenceMatcher(None, left[0], right[0]).ratio()
     company_similarity = SequenceMatcher(None, left[1], right[1]).ratio()
@@ -296,7 +329,7 @@ def clean_jobs(records: list[dict[str, Any]], fuzzy_threshold: float = 0.90) -> 
     the salary_is_estimated column remains true for downstream filtering.
     """
     columns = [
-        "title", "company", "location", "country", "work_mode", "salary_min_usd",
+        "title", "company", "location", "country", "region", "engineering_branch", "domain", "is_live", "salary_display", "work_mode", "salary_min_usd",
         "salary_max_usd", "salary_is_estimated", "experience_level", "description",
         "skills", "category", "apply_url", "source", "posted_at",
     ]
@@ -307,20 +340,37 @@ def clean_jobs(records: list[dict[str, Any]], fuzzy_threshold: float = 0.90) -> 
         company = re.sub(r"\s+", " ", _text(record.get("company") or record.get("company_name"))).strip()
         apply_url = _text(record.get("apply_url") or record.get("url") or record.get("link"))
         description = _text(record.get("description") or record.get("details"))
-        if not title or not company or not apply_url or not description:
+        if not title or not company or not _authentic_https_apply_url(apply_url):
             invalid_dropped += 1
             continue
 
         location = _location(record.get("location"))
         mode = _work_mode(record, location, description)
+        country = _country(record, location)[:80]
+        taxonomy = classify_job(title, description, location, country, mode)
         category = _category(title, description, _text(record.get("category")))
         experience = _experience(title, description, _text(record.get("experience_level")))
         salary_min, salary_max, salary_is_estimated = _salary_fields(record)
+        salary_display = _text(
+            record.get("salary_display") or record.get("salary") or record.get("salary_text")
+            or record.get("compensation")
+        )
+        if not salary_display and (record.get("salary_min_native") is not None or record.get("salary_min_usd") is not None):
+            currency = _text(record.get("salary_currency")) or "USD"
+            low_native = record.get("salary_min_native", record.get("salary_min_usd"))
+            high_native = record.get("salary_max_native", record.get("salary_max_usd"))
+            if low_native is not None and high_native is not None:
+                salary_display = f"{currency} {low_native}–{high_native}"
         jobs.append({
             "title": title[:180],
             "company": company[:160],
             "location": location[:160],
-            "country": _country(record, location)[:80],
+            "country": taxonomy["country"][:80],
+            "region": taxonomy["region"],
+            "engineering_branch": taxonomy["engineering_branch"],
+            "domain": taxonomy["domain"],
+            "is_live": bool(record.get("is_live", True)),
+            "salary_display": salary_display[:160] or None,
             "work_mode": mode,
             "salary_min_usd": salary_min,
             "salary_max_usd": salary_max,
@@ -332,7 +382,7 @@ def clean_jobs(records: list[dict[str, Any]], fuzzy_threshold: float = 0.90) -> 
             "apply_url": apply_url[:500],
             "source": (_text(record.get("source")) or "unknown")[:100],
             "posted_at": record.get("posted_at") or record.get("date"),
-            "_dedupe_key": (normalize_title(title), normalize_company(company)),
+            "_dedupe_key": (normalize_title(title), normalize_company(company), taxonomy["country"].casefold()),
         })
 
     unique: list[dict[str, Any]] = []

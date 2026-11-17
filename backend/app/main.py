@@ -9,6 +9,7 @@ from app.api.analytics import router as analytics_router
 from app.api.cv import router as cv_router
 from app.api.etl import router as etl_router
 from app.api.jobs import router as jobs_router
+from app.api.taxonomy import router as taxonomy_router
 from app.db import initialize_database
 
 
@@ -31,6 +32,7 @@ app.include_router(etl_router)
 app.include_router(cv_router)
 app.include_router(jobs_router)
 app.include_router(analytics_router)
+app.include_router(taxonomy_router)
 
 
 @app.get("/health", tags=["system"])
