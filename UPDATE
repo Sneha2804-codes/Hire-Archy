@@ -1,0 +1,293 @@
+<div align="center">
+
+<img src="docs/images/logo.png" alt="Hire Archy logo" width="460">
+
+# Hire-Archy
+
+**Your next move, with a clearer signal.**
+
+Live engineering jobs from real sources, matched to your CV with a score you can read, and a labor-market dashboard that shows what the market actually pays for.
+
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-async-D71F00)
+![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white)
+![Tests](https://img.shields.io/badge/pytest-18_tests-0A9EDC?logo=pytest&logoColor=white)
+
+</div>
+
+> [!TIP]
+> Everything on screen comes from real job listings. Every role keeps its original HTTPS apply link, and records with missing or placeholder URLs are dropped before they reach the database.
+
+![Hire-Archy home screen: an active candidate profile with detected skills, headline stats and the job search bar](docs/images/home.png)
+
+## 🔥 The problem in one picture
+
+Job boards are noisy. The same role is posted on three sites, salaries are missing or quoted in five currencies, and a keyword match tells you nothing about whether you are actually a fit. Engineering students and early-career developers are left guessing which skills are worth learning next.
+
+Hire-Archy fixes the three parts of that guesswork:
+
+| Problem | What Hire-Archy does |
+| --- | --- |
+| Duplicates and dead links | Cleans, fuzzy de-duplicates (similarity 0.90) and keeps only real HTTPS apply URLs |
+| Missing or mixed-currency pay | Normalizes salary to annual USD, and flags every imputed figure as `estimated` |
+| "Am I a fit?" | Scores each role against your CV with a transparent 50 / 35 / 15 formula and lists the skills you are missing |
+
+## ✨ What you can do
+
+### 🔎 Job Explorer
+
+Search and filter every indexed role by category, region, engineering branch, work mode, experience level, minimum salary and skills. Sort by recent, salary or best fit for your CV. **Fetch Live Jobs** pulls fresh postings for your current filters on demand.
+
+![Job Explorer: role cards with a circular match score, salary range and skill tags](docs/images/job-explorer.png)
+
+### 📄 CV matching
+
+Upload a PDF. Hire-Archy extracts the text, detects your skills against a 64-skill canonical dictionary, estimates your experience and builds an embedding. Every role then gets a match score from 0 to 100 with the semantic, skill and experience parts shown separately, so you can see why a role ranked where it did.
+
+### 📊 Market Analytics
+
+Skill demand next to what each skill pays, salary quartiles (P25, median, P75) by experience level and work mode, remote share, and the highest-paying skill in the index. With a CV loaded, it also ranks the skills you are missing by how often they appear in roles you already score 60 or higher on.
+
+![Market Analytics: top skills by demand with mean salary, and salary quartiles by experience and work mode](docs/images/market-analytics.png)
+
+### 🏗️ Engineering taxonomy
+
+Not just software. Roles are classified into 7 engineering branches and 32 domains: Computer Science & IT, Mechanical, Civil & Structural, Electrical & Electronics, Chemical & Process, Aerospace & Automotive, and Industrial & Manufacturing.
+
+### 🎨 Three themes
+
+Blended Urban, Light and Midnight, switchable from the header.
+
+## 🛰️ Where the jobs come from
+
+All collectors live in [`backend/app/etl/live_sources.py`](backend/app/etl/live_sources.py) and run concurrently. A source that is rate limited or down is skipped; the others still complete the sync.
+
+| Source | Coverage | Key needed? |
+| --- | --- | --- |
+| Arbeitnow | Open listings, mainly Europe | No |
+| Remotive | Remote roles, keyword searchable | No |
+| Greenhouse | Public boards: Stripe, Cloudflare, Datadog, NVIDIA, Anduril, Rippling, Atlassian, Retool | No |
+| Lever | Public boards: Tesla, Joby Aviation, Anduril, Zoox, Aurora, Samsara, Waymo, Brex | No |
+| Adzuna | India, Singapore, Australia, UK, Germany, US. Capped at 8 calls per sync to protect quota | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` |
+| Jooble | 16 regional hubs across India, APAC, Europe, North America and the Middle East | `JOOBLE_API_KEY` |
+
+The app works with no keys at all. Adzuna and Jooble simply log that they are skipped.
+
+## 🧪 How the matching works
+
+```
+match score = 0.50 × semantic similarity
+            + 0.35 × skill similarity
+            + 0.15 × experience alignment
+
+skill similarity = 0.60 × TF-IDF cosine + 0.40 × canonical-skill Jaccard
+```
+
+- **Semantic:** cosine similarity between the CV embedding and the job embedding.
+- **Skill:** TF-IDF cosine over the text, blended with the overlap between your canonical skills and the role's.
+- **Experience:** how far your years of experience sit from the role's band (entry 0-2, mid 2-5, senior 5-8, lead 8-12).
+- **Embeddings:** OpenAI `text-embedding-3-small` when `OPENAI_API_KEY` is set. Otherwise a deterministic local 1,536-dimension feature-hash vector, so everything still runs offline. The ETL logs a warning when it falls back.
+- **Salary:** parsed to annual USD. A missing range is imputed from same-category, same-experience listings, otherwise from documented experience benchmarks, and the row is marked `salary_is_estimated`.
+
+The formulas are documented in docstrings under [`backend/app/analytics/`](backend/app/analytics/), and `test_composite_match_score_uses_documented_50_35_15_weights` pins the weights.
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart LR
+    subgraph SRC[Job sources]
+        A[Arbeitnow, Remotive]
+        B[Greenhouse, Lever]
+        C[Adzuna, Jooble]
+    end
+
+    subgraph BE[Hire-Archy backend - Python]
+        E[Collectors<br/>concurrent, quota-aware]
+        F[Clean and de-duplicate<br/>real HTTPS URLs only]
+        G[Classify<br/>taxonomy, region, skills]
+        H[Salary to annual USD<br/>flag estimates]
+        I[Embeddings<br/>OpenAI or local hash]
+        J[(SQLite via SQLAlchemy)]
+        K[Matcher and market stats<br/>pandas, scikit-learn]
+        L[FastAPI /api/*]
+    end
+
+    M[CV PDF upload<br/>PyMuPDF] --> K
+    A & B & C --> E --> F --> G --> H --> I --> J
+    J <--> K
+    K --> L
+    L -- JSON --> N[Next.js app<br/>Job Explorer and Market Analytics]
+```
+
+## 🚀 Quick start (Windows 11, PowerShell)
+
+Needs Python 3.11+, [uv](https://docs.astral.sh/uv/), Node.js 20+ and [pnpm](https://pnpm.io/).
+
+```powershell
+git clone https://github.com/Sneha2804-codes/Hire-Archy.git
+cd Hire-Archy
+```
+
+**1. Backend** (terminal 1)
+
+```powershell
+cd backend
+uv sync --extra dev
+Copy-Item .env.example .env
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload
+```
+
+The API runs on `http://localhost:8000`, with interactive docs at `/docs`. SQLite is the default, so there is no database server to install.
+
+**2. Frontend** (terminal 2)
+
+```powershell
+cd frontend
+Copy-Item .env.example .env.local
+pnpm install
+pnpm dev
+```
+
+Open `http://localhost:3000`.
+
+**3. Load real jobs**
+
+Click **ETL Sync** in the header, or run a one-off collection from `backend/`:
+
+```powershell
+uv run python -m app.etl.run --limit 25
+```
+
+> [!NOTE]
+> Adzuna and Jooble are optional. To enable them, add `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` and `JOOBLE_API_KEY` to `backend/.env`. For OpenAI embeddings, set `OPENAI_API_KEY`. Playwright is optional and only used by the feed scrapers in `backend/app/etl/scraper.py`: `uv run playwright install chromium`.
+
+<details>
+<summary><b>Environment variables</b></summary>
+
+| Variable | File | Default | Purpose |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | `backend/.env` | `sqlite+aiosqlite:///./hire_archy.db` | Database connection |
+| `OPENAI_API_KEY` | `backend/.env` | empty | Real embeddings; local hash vectors otherwise |
+| `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` | `backend/.env` | unset | Enables Adzuna |
+| `JOOBLE_API_KEY` | `backend/.env` | unset | Enables Jooble |
+| `NEXT_PUBLIC_API_URL` | `frontend/.env.local` | `http://localhost:8000/api` | Where the frontend finds the API |
+
+</details>
+
+<details>
+<summary><b>Optional: Postgres and Redis with Docker</b></summary>
+
+`docker-compose.yml` starts `pgvector/pgvector:pg16` and `redis:7-alpine` for anyone who wants to move off SQLite. The app does not require either.
+
+```powershell
+docker compose up -d
+```
+
+Then point `DATABASE_URL` at the Postgres container.
+
+</details>
+
+<details>
+<summary><b>Offline demo data</b></summary>
+
+`backend/scripts/seed_dataset.py` removes legacy synthetic demo rows (source `hire-archy-seed`) and never inserts fake listings. It also holds deterministic fixtures used by the unit tests.
+
+```powershell
+uv run python scripts/seed_dataset.py
+```
+
+</details>
+
+## 🔌 API
+
+| Method | Endpoint | What it does |
+| --- | --- | --- |
+| `GET` | `/api/jobs` | List jobs. Filters: `q`, `category`, `region`, `engineering_branch`, `work_mode`, `experience_level`, `min_salary`, repeated `skills`, `profile_id`. Sort with `sort_by=recent\|salary\|match`. Paginate with `page` and `limit` (max 100) |
+| `POST` | `/api/jobs/live-search` | Fetch fresh postings for the given filters, persist new ones and return them |
+| `POST` | `/api/cv/upload` | Upload a PDF CV. Returns the stored candidate profile |
+| `GET` | `/api/analytics/overview` | Skill demand, salary quartiles, volume by category and work mode. Add `profile_id` for skill-gap ROI |
+| `GET` | `/api/taxonomy` | Engineering branches, domains and regions |
+| `POST` | `/api/etl/run?limit=25` | Start a live sync as a background task |
+| `GET` | `/api/etl/logs` | Recent sync counters: fetched, duplicates, invalid |
+
+`sort_by=match` needs a `profile_id`, so upload a CV first.
+
+## TECH STACK 
+
+| Layer | Stack |
+| --- | --- |
+| Backend | Python 3.11+ · FastAPI · Pydantic · Uvicorn |
+| Data | SQLAlchemy (async) · Alembic migrations · SQLite by default |
+| Analytics | pandas · NumPy · scikit-learn (TF-IDF) |
+| CV parsing | PyMuPDF with a regex and skill-dictionary fallback |
+| Ingestion | httpx (Playwright available for scraped feeds) |
+| Frontend | Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS 4 · shadcn/ui |
+| Charts | Recharts |
+| Tests | pytest |
+
+<details>
+<summary><b>Repository layout</b></summary>
+
+```
+Hire-Archy/
+├── backend/
+│   ├── app/
+│   │   ├── analytics/     matcher.py, market_stats.py
+│   │   ├── api/           jobs, cv, analytics, taxonomy, etl routes
+│   │   ├── etl/           live_sources, scraper, cleaner, taxonomy, embeddings, pipeline, run
+│   │   ├── models/        Job, CandidateProfile, ScrapeRun
+│   │   └── schemas/
+│   ├── migrations/        Alembic versions 0001-0004
+│   ├── scripts/           seed_dataset.py
+│   └── tests/
+├── frontend/
+│   ├── app/               Job Explorer and /analytics pages
+│   └── components/        job-explorer, analytics-dashboard, cv-upload-dialog, theme-switcher, ui/
+├── docs/images/           README logo and screenshots
+└── docker-compose.yml     optional Postgres + Redis
+```
+
+</details>
+
+## ✅ Run the checks
+
+```powershell
+cd backend
+uv run pytest
+
+cd ..\frontend
+pnpm build
+```
+
+The backend suite has 18 tests covering the ETL cleaner, taxonomy and skill extraction, the 50 / 35 / 15 match weights, market statistics and the seed fixtures.
+
+## ⚠️ Honest limitations
+
+- Salaries marked `estimated` are imputed, not published by the employer. Treat them as a guide.
+- Salary conversion uses fixed fallback exchange rates, not live ones. A pay string in an unsupported currency is left empty rather than mislabeled as USD.
+- Local feature-hash embeddings keep lexical similarity but are not a substitute for a real embedding model. Use `OPENAI_API_KEY` before relying on match scores for real decisions.
+- Market statistics describe the roles currently indexed from the sources above, not the whole job market.
+- CV extraction needs a PDF with selectable text. Scanned image PDFs are rejected with a clear error.
+- A match score ranks roles for you. It does not predict whether you will be hired.
+
+## 👥 Team
+
+- Sneha Sadhukhan
+- Ria Wandra
+- Anwesha Priya
+- Raj Vardhan
+
+## 🙏 Attribution
+
+
+
+<div align="center">
+
+**Hire-Archy** · Built for engineers who want a clearer signal.
+
+</div>
